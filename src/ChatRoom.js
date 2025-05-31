@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 
-const socket = io("http://localhost:5000");
-
 const ChatRoom = () => {
   const [user, setUser] = useState("");
   const [message, setMessage] = useState("");
@@ -16,44 +14,53 @@ const ChatRoom = () => {
   const [showActionsId, setShowActionsId] = useState(null);
 
   const messagesEndRef = useRef(null);
+  const socketRef = useRef(null);
 
   useEffect(() => {
-    socket.on("receive_message", (data) => {
+    // Initialize socket connection on mount
+    socketRef.current = io("http://localhost:5000");
+
+    // Setup socket listeners
+    socketRef.current.on("receive_message", (data) => {
       setMessages((prev) => [...prev, data]);
     });
 
-    socket.on("edit_message", (updatedMsg) => {
+    socketRef.current.on("edit_message", (updatedMsg) => {
       setMessages((prev) =>
         prev.map((msg) => (msg._id === updatedMsg._id ? updatedMsg : msg))
       );
     });
 
-    socket.on("delete_message", (id) => {
+    socketRef.current.on("delete_message", (id) => {
       setMessages((prev) => prev.filter((msg) => msg._id !== id));
     });
 
     return () => {
-      socket.off("receive_message");
-      socket.off("edit_message");
-      socket.off("delete_message");
+      // Clean up listeners and disconnect socket on unmount
+      socketRef.current.off("receive_message");
+      socketRef.current.off("edit_message");
+      socketRef.current.off("delete_message");
+      socketRef.current.disconnect();
     };
   }, []);
 
   useEffect(() => {
+    // Auto scroll chat to bottom when messages update
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   const joinRoom = async () => {
-    if (room.trim() !== "" && user.trim() !== "") {
-      socket.emit("join_room", room);
-      try {
-        const response = await fetch(`http://localhost:5000/messages/${room}`);
-        const data = await response.json();
-        setMessages(data);
-        setJoined(true);
-      } catch {
-        alert("Failed to join room or fetch messages.");
-      }
+    if (room.trim() === "" || user.trim() === "") return;
+    socketRef.current.emit("join_room", room);
+
+    try {
+      const response = await fetch(`http://localhost:5000/messages/${room}`);
+      if (!response.ok) throw new Error("Failed to fetch messages");
+      const data = await response.json();
+      setMessages(data);
+      setJoined(true);
+    } catch (error) {
+      alert("Failed to join room or fetch messages.");
     }
   };
 
@@ -70,57 +77,61 @@ const ChatRoom = () => {
           method: "POST",
           body: formData,
         });
+        if (!res.ok) throw new Error("Upload failed");
         const data = await res.json();
         const msgData = { user, message: "", room, fileUrl: data.fileUrl };
 
-        await fetch("http://localhost:5000/messages", {
+        const resMsg = await fetch("http://localhost:5000/messages", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(msgData),
         });
-      } catch {
-        alert("Upload failed");
-      }
+        if (!resMsg.ok) throw new Error("Failed to send message");
 
-      setSelectedFile(null);
-      setMessage("");
-      setUploading(false);
-    } else {
-      const msgData = { user, message: message.trim(), room };
-
-      try {
-        await fetch("http://localhost:5000/messages", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(msgData),
-        });
+        setSelectedFile(null);
         setMessage("");
-      } catch {
-        alert("Failed to send message");
+      } catch (err) {
+        alert(err.message || "Upload failed");
+      } finally {
+        setUploading(false);
       }
-      setUploading(false);
+    } else {
+      try {
+        const msgData = { user, message: message.trim(), room };
+        const res = await fetch("http://localhost:5000/messages", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(msgData),
+        });
+        if (!res.ok) throw new Error("Failed to send message");
+        setMessage("");
+      } catch (err) {
+        alert(err.message || "Failed to send message");
+      } finally {
+        setUploading(false);
+      }
     }
   };
 
   const startEdit = (msg) => {
     setEditingId(msg._id);
     setEditText(msg.message);
-    setShowActionsId(null); // auto-hide
+    setShowActionsId(null);
   };
 
   const saveEdit = async (id) => {
     if (editText.trim() === "") return;
-
     try {
-      await fetch(`http://localhost:5000/messages/${id}`, {
+      const res = await fetch(`http://localhost:5000/messages/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: editText.trim() }),
       });
+      if (!res.ok) throw new Error("Failed to save edit");
 
       setEditingId(null);
       setEditText("");
-      setShowActionsId(null); // auto-hide
+      setShowActionsId(null);
     } catch {
       alert("Failed to save edit");
     }
@@ -129,13 +140,17 @@ const ChatRoom = () => {
   const cancelEdit = () => {
     setEditingId(null);
     setEditText("");
-    setShowActionsId(null); // auto-hide
+    setShowActionsId(null);
   };
 
   const deleteMessage = async (id) => {
     try {
-      await fetch(`http://localhost:5000/messages/${id}`, { method: "DELETE" });
-      setShowActionsId(null); // auto-hide
+      const res = await fetch(`http://localhost:5000/messages/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete message");
+
+      setShowActionsId(null);
     } catch {
       alert("Failed to delete message");
     }
@@ -154,7 +169,7 @@ const ChatRoom = () => {
 
   return (
     <div className="chat-container">
-      <h2>Realtime Chat App</h2>
+      <h2>Chat App</h2>
       {!joined ? (
         <div className="join-room">
           <input
@@ -169,7 +184,9 @@ const ChatRoom = () => {
             value={room}
             onChange={(e) => setRoom(e.target.value)}
           />
-          <button onClick={joinRoom}>Join Room</button>
+          <button onClick={joinRoom} disabled={!user.trim() || !room.trim()}>
+            Join Room
+          </button>
         </div>
       ) : (
         <div className="chat-box">
@@ -196,9 +213,14 @@ const ChatRoom = () => {
                       type="text"
                       value={editText}
                       onChange={(e) => setEditText(e.target.value)}
+                      disabled={uploading}
                     />
-                    <button onClick={() => saveEdit(msg._id)}>Save</button>
-                    <button onClick={cancelEdit}>Cancel</button>
+                    <button onClick={() => saveEdit(msg._id)} disabled={uploading}>
+                      Save
+                    </button>
+                    <button onClick={cancelEdit} disabled={uploading}>
+                      Cancel
+                    </button>
                   </div>
                 ) : msg.fileUrl ? (
                   <div>
@@ -230,7 +252,7 @@ const ChatRoom = () => {
               onChange={(e) => setMessage(e.target.value)}
               disabled={uploading}
             />
-            <button onClick={sendMessage} disabled={uploading}>
+            <button onClick={sendMessage} disabled={uploading || (!message.trim() && !selectedFile)}>
               Send
             </button>
 
@@ -247,7 +269,9 @@ const ChatRoom = () => {
             {selectedFile && (
               <div className="file-preview">
                 Selected file: {selectedFile.name}{" "}
-                <button onClick={() => setSelectedFile(null)}>Remove</button>
+                <button onClick={() => setSelectedFile(null)} disabled={uploading}>
+                  Remove
+                </button>
               </div>
             )}
           </div>
