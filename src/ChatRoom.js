@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 
+const BACKEND_URL = "https://chat-backend-cc4znw8u0-janus-projects-c94c7938.vercel.app";
+
 const ChatRoom = () => {
   const [user, setUser] = useState("");
   const [message, setMessage] = useState("");
@@ -18,7 +20,7 @@ const ChatRoom = () => {
 
   useEffect(() => {
     // Initialize socket connection on mount
-    socketRef.current = io("http://localhost:5000");
+    socketRef.current = io(BACKEND_URL);
 
     // Setup socket listeners
     socketRef.current.on("receive_message", (data) => {
@@ -54,7 +56,7 @@ const ChatRoom = () => {
     socketRef.current.emit("join_room", room);
 
     try {
-      const response = await fetch(`http://localhost:5000/messages/${room}`);
+      const response = await fetch(`${BACKEND_URL}/messages/${room}`);
       if (!response.ok) throw new Error("Failed to fetch messages");
       const data = await response.json();
       setMessages(data);
@@ -73,7 +75,7 @@ const ChatRoom = () => {
       formData.append("file", selectedFile);
 
       try {
-        const res = await fetch("http://localhost:5000/upload", {
+        const res = await fetch(`${BACKEND_URL}/upload`, {
           method: "POST",
           body: formData,
         });
@@ -81,7 +83,7 @@ const ChatRoom = () => {
         const data = await res.json();
         const msgData = { user, message: "", room, fileUrl: data.fileUrl };
 
-        const resMsg = await fetch("http://localhost:5000/messages", {
+        const resMsg = await fetch(`${BACKEND_URL}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(msgData),
@@ -98,7 +100,7 @@ const ChatRoom = () => {
     } else {
       try {
         const msgData = { user, message: message.trim(), room };
-        const res = await fetch("http://localhost:5000/messages", {
+        const res = await fetch(`${BACKEND_URL}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(msgData),
@@ -122,7 +124,7 @@ const ChatRoom = () => {
   const saveEdit = async (id) => {
     if (editText.trim() === "") return;
     try {
-      const res = await fetch(`http://localhost:5000/messages/${id}`, {
+      const res = await fetch(`${BACKEND_URL}/messages/${id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: editText.trim() }),
@@ -145,7 +147,7 @@ const ChatRoom = () => {
 
   const deleteMessage = async (id) => {
     try {
-      const res = await fetch(`http://localhost:5000/messages/${id}`, {
+      const res = await fetch(`${BACKEND_URL}/messages/${id}`, {
         method: "DELETE",
       });
       if (!res.ok) throw new Error("Failed to delete message");
@@ -252,7 +254,10 @@ const ChatRoom = () => {
               onChange={(e) => setMessage(e.target.value)}
               disabled={uploading}
             />
-            <button onClick={sendMessage} disabled={uploading || (!message.trim() && !selectedFile)}>
+            <button
+              onClick={sendMessage}
+              disabled={uploading || (!message.trim() && !selectedFile)}
+            >
               Send
             </button>
 
